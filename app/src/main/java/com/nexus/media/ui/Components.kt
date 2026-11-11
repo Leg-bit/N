@@ -6,9 +6,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.util.Base64
 import android.util.LruCache
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.combinedClickable
+import androidx.navigation.NavHostController
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -39,18 +41,9 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 val LocalContainer = staticCompositionLocalOf<AppContainer> { error("AppContainer not provided") }
+val LocalNav = staticCompositionLocalOf<NavHostController?> { null }
+val LocalOpenDrawer = staticCompositionLocalOf<() -> Unit> { {} }
 
-fun fmtTime(ms: Long): String {
-    val s = (ms / 1000).coerceAtLeast(0)
-    val h = s / 3600
-    val m = (s % 3600) / 60
-    val sec = s % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%02d:%02d".format(m, sec)
-}
-
-fun folderName(path: String) = path.trimEnd('/').substringAfterLast('/')
-fun enc(s: String): String = Base64.encodeToString(s.toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-fun dec(s: String): String = String(Base64.decode(s, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING))
 
 fun openMedia(ctx: Context, c: AppContainer, item: MediaEntity, list: List<MediaEntity>) {
     if (item.mediaType == "video") {
@@ -166,6 +159,7 @@ fun MediaRow(
     onRemove: (() -> Unit)? = null
 ) {
     val c = LocalContainer.current
+    val nav = LocalNav.current
     var menu by remember { mutableStateOf(false) }
     var pick by remember { mutableStateOf(false) }
     Row(
@@ -193,6 +187,7 @@ fun MediaRow(
                     DropdownMenuItem(text = { Text("Putar berikutnya") }, onClick = { c.player.playNext(item); menu = false })
                     DropdownMenuItem(text = { Text("Tambah ke antrian") }, onClick = { c.player.addToQueue(item); menu = false })
                 }
+                DropdownMenuItem(text = { Text("Detail") }, onClick = { menu = false; nav?.navigate("details/${item.id}") })
                 DropdownMenuItem(text = { Text("Tambah ke playlist") }, onClick = { menu = false; pick = true })
                 if (onRemove != null) {
                     DropdownMenuItem(text = { Text("Hapus dari playlist") }, onClick = { onRemove(); menu = false })
@@ -246,9 +241,11 @@ fun PlaylistPickerDialog(item: MediaEntity, onDismiss: () -> Unit) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoCard(item: MediaEntity, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Column(modifier.clickable(onClick = onClick)) {
+    val nav = LocalNav.current
+    Column(modifier.combinedClickable(onClick = onClick, onLongClick = { nav?.navigate("details/${item.id}") })) {
         Box {
             Thumb(item, Modifier.fillMaxWidth().aspectRatio(16 / 9f))
             Text(

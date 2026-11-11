@@ -1,6 +1,8 @@
 package com.nexus.media.features
 
 import androidx.lifecycle.ViewModel
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import androidx.lifecycle.viewModelScope
 import com.nexus.media.data.local.entities.MediaEntity
 import com.nexus.media.di.AppContainer
@@ -10,7 +12,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class LibraryViewModel(private val c: AppContainer) : ViewModel() {
+@HiltViewModel
+class LibraryViewModel @Inject constructor(private val c: AppContainer) : ViewModel() {
     private fun <T> Flow<T>.hot(init: T): StateFlow<T> =
         stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), init)
 

@@ -48,6 +48,10 @@ class UserPreferences(context: Context) {
         get() = sp.getLong("last_pos", 0L)
         set(v) = sp.edit().putLong("last_pos", v).apply()
 
+    var videoBgAudio: Boolean
+        get() = sp.getBoolean("video_bg_audio", false)
+        set(v) = sp.edit().putBoolean("video_bg_audio", v).apply()
+
     fun lyricsUri(id: String): String? = sp.getString("lyr_$id", null)
     fun setLyricsUri(id: String, uri: String) = sp.edit().putString("lyr_$id", uri).apply()
 

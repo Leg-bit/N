@@ -19,7 +19,15 @@ GitHub Actions: lihat `.github/workflows/build.yml`, APK ada di tab Actions -> A
 
 ## Catatan arsitektur
 Paket: `core`, `data`, `media`, `player`, `features`, `ui`, `di`.
-DI memakai `AppContainer` manual (Hilt belum dipasang supaya build awal stabil); mudah dimigrasi ke Hilt.
+DI: Hilt menyediakan `AppContainer` (singleton) yang memegang database, repository, scanner, player, dan equalizer.
 
-## Belum ada
-Thumbnail preview di timeline video, audio latar belakang untuk video, unit test.
+## Tambahan v0.2
+- Hilt (DI) + `@HiltViewModel`
+- Preview thumbnail saat menggeser timeline video
+- Audio latar untuk video (tombol headphone di player video) lewat MediaSession + notifikasi
+- Halaman detail audio/video (menu ⋮ atau tekan lama kartu video)
+- Filter kategori storage: Music, Movies, Download, DCIM, Recordings, Kustom
+- Navigation Drawer (tombol menu di Beranda)
+- Lirik otomatis dari file `<lagu>.lrc` / `.txt` di folder yang sama (Android 10 ke bawah), atau pilih manual
+- Akses media parsial Android 14
+- Tes: unit test (`gradle testDebugUnitTest`) dan instrumented test Room DAO (`gradle connectedDebugAndroidTest`, perlu emulator/perangkat)

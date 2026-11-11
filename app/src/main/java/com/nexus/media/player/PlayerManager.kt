@@ -121,11 +121,11 @@ class PlayerManager(
         controllerFuture = MediaController.Builder(ctx, token).buildAsync()
     }
 
-    fun play(items: List<MediaEntity>, start: Int) {
+    fun play(items: List<MediaEntity>, start: Int, startPosMs: Long = 0L) {
         if (items.isEmpty()) return
         ensureService()
         queueItems = items
-        player.setMediaItems(items.map { toItem(it) }, start.coerceIn(items.indices), 0L)
+        player.setMediaItems(items.map { toItem(it) }, start.coerceIn(items.indices), startPosMs)
         player.prepare()
         player.play()
         publish()

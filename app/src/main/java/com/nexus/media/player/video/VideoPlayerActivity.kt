@@ -1,6 +1,18 @@
 package com.nexus.media.player.video
 
 import android.app.Activity
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.res.Configuration
@@ -54,9 +66,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+@AndroidEntryPoint
 class VideoPlayerActivity : ComponentActivity() {
     private lateinit var player: ExoPlayer
-    private lateinit var container: AppContainer
+    @Inject lateinit var container: AppContainer
+    private var bgAudio by mutableStateOf(false)
+    private var handedOff = false
     private var mediaId = ""
     private var inPip by mutableStateOf(false)
 
@@ -66,8 +81,8 @@ class VideoPlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        container = (application as NexusApplication).container
         container.player.player.pause()
+        bgAudio = container.prefs.videoBgAudio
         val uri = intent.data
         if (uri == null) { finish(); return }
         mediaId = intent.getStringExtra("id").orEmpty()
@@ -101,7 +116,10 @@ class VideoPlayerActivity : ComponentActivity() {
                     hideControls = inPip,
                     onBack = { finish() },
                     onPip = { enterPip() },
-                    onPickSubtitle = { subPicker.launch(arrayOf("*/*")) }
+                    onPickSubtitle = { subPicker.launch(arrayOf("*/*")) },
+                    uri = uri,
+                    bgAudio = bgAudio,
+                    onToggleBg = { bgAudio = !bgAudio; container.prefs.videoBgAudio = bgAudio }
                 )
             }
         }
@@ -159,9 +177,34 @@ class VideoPlayerActivity : ComponentActivity() {
         savePosition()
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (handedOff && ::player.isInitialized) {
+            handedOff = false
+            val pos = container.player.player.currentPosition
+            container.player.player.pause()
+            player.seekTo(pos)
+            player.play()
+        }
+    }
+
     override fun onStop() {
         super.onStop()
-        if (::player.isInitialized && !isInPictureInPictureMode) player.pause()
+        if (!::player.isInitialized || isInPictureInPictureMode) return
+        if (bgAudio && !isFinishing && player.isPlaying && mediaId.isNotEmpty()) {
+            // Background audio: hand the video's audio track to the shared player + MediaSession notification.
+            val pos = player.currentPosition
+            player.pause()
+            lifecycleScope.launch {
+                val e = container.db.media().getMany(listOf(mediaId)).firstOrNull()
+                if (e != null) {
+                    handedOff = true
+                    container.player.play(listOf(e), 0, pos)
+                }
+            }
+        } else {
+            player.pause()
+        }
     }
 
     override fun onDestroy() {
@@ -177,7 +220,10 @@ private fun VideoScreen(
     hideControls: Boolean,
     onBack: () -> Unit,
     onPip: () -> Unit,
-    onPickSubtitle: () -> Unit
+    onPickSubtitle: () -> Unit,
+    uri: Uri,
+    bgAudio: Boolean,
+    onToggleBg: () -> Unit
 ) {
     val ctx = LocalContext.current
     val act = ctx as Activity
@@ -195,6 +241,26 @@ private fun VideoScreen(
     var seekPos by remember { mutableFloatStateOf(0f) }
     var speedMenu by remember { mutableStateOf(false) }
     var subMenu by remember { mutableStateOf(false) }
+
+    // Timeline thumbnail preview while scrubbing
+    val retriever = remember { MediaMetadataRetriever().also { r -> runCatching { r.setDataSource(ctx, uri) } } }
+    val lock = remember { Mutex() }
+    DisposableEffect(Unit) { onDispose { runCatching { retriever.release() } } }
+    val preview by produceState<Bitmap?>(null, seeking, (seekPos / 1000).toInt()) {
+        if (!seeking) {
+            value = null
+        } else {
+            value = lock.withLock {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        retriever.getFrameAtTime(seekPos.toLong() * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { f ->
+                            Bitmap.createScaledBitmap(f, 320, (320f * f.height / f.width).toInt().coerceAtLeast(1), true)
+                        }
+                    }.getOrNull()
+                }
+            }
+        }
+    }
 
     DisposableEffect(player) {
         val l = object : Player.Listener {
@@ -290,6 +356,9 @@ private fun VideoScreen(
                 Row(Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Kembali", tint = Color.White) }
                     Text(title, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onToggleBg) {
+                        Icon(Icons.Rounded.Headphones, "Audio latar", tint = if (bgAudio) MaterialTheme.colorScheme.primary else Color.White)
+                    }
                     Box {
                         IconButton(onClick = { subMenu = true }) { Icon(Icons.Rounded.Subtitles, "Subtitle", tint = Color.White) }
                         DropdownMenu(expanded = subMenu, onDismissRequest = { subMenu = false }) {
@@ -338,6 +407,12 @@ private fun VideoScreen(
                     }
                     IconButton(onClick = { player.seekTo((player.currentPosition + 10_000).coerceAtMost(player.duration.coerceAtLeast(0))) }) {
                         Icon(Icons.Rounded.Forward10, "Maju", tint = Color.White, modifier = Modifier.size(40.dp))
+                    }
+                }
+                preview?.let { b ->
+                    Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Image(b.asImageBitmap(), null, Modifier.width(160.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Fit)
+                        Text(fmtTime(seekPos.toLong()), color = Color.White, style = MaterialTheme.typography.labelMedium)
                     }
                 }
                 Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {

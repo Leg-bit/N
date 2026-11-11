@@ -38,33 +38,12 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.Player
 import com.nexus.media.data.local.entities.MediaEntity
 import com.nexus.media.di.AppContainer
+import com.nexus.media.player.audio.LyricLine
+import com.nexus.media.player.audio.loadSidecarLyrics
+import com.nexus.media.player.audio.parseLyrics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-
-private data class LyricLine(val timeMs: Long, val text: String)
-
-private val tagRe = Regex("\\[(\\d{1,3}):(\\d{2})(?:[.:](\\d{1,3}))?\\]")
-
-private fun parseLyrics(raw: String): List<LyricLine> {
-    val out = mutableListOf<LyricLine>()
-    for (line in raw.lines()) {
-        val tags = tagRe.findAll(line).toList()
-        val text = tagRe.replace(line, "").trim()
-        if (tags.isEmpty()) {
-            if (text.isNotEmpty() && !text.startsWith("[")) out.add(LyricLine(-1, text))
-        } else {
-            for (t in tags) {
-                val m = t.groupValues[1].toLong()
-                val s = t.groupValues[2].toLong()
-                val f = t.groupValues[3]
-                val ms = if (f.isEmpty()) 0L else f.padEnd(3, '0').take(3).toLong()
-                out.add(LyricLine((m * 60 + s) * 1000 + ms, text))
-            }
-        }
-    }
-    return if (out.any { it.timeMs >= 0 }) out.filter { it.timeMs >= 0 }.sortedBy { it.timeMs } else out
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -225,12 +204,15 @@ private fun LyricsView(item: MediaEntity, posMs: Long, c: AppContainer, modifier
             uriStr = u.toString()
         }
     }
-    val lines by produceState<List<LyricLine>>(emptyList(), uriStr) {
+    val lines by produceState<List<LyricLine>>(emptyList(), uriStr, item.id) {
         val s = uriStr
-        value = if (s == null) emptyList() else withContext(Dispatchers.IO) {
-            runCatching {
-                parseLyrics(ctx.contentResolver.openInputStream(Uri.parse(s))!!.bufferedReader().use { it.readText() })
-            }.getOrDefault(emptyList())
+        value = withContext(Dispatchers.IO) {
+            val raw = if (s != null) {
+                runCatching { ctx.contentResolver.openInputStream(Uri.parse(s))!!.bufferedReader().use { it.readText() } }.getOrNull()
+            } else {
+                loadSidecarLyrics(ctx, Uri.parse(item.uri))   // auto: <lagu>.lrc / .txt di folder yang sama
+            }
+            if (raw == null) emptyList() else parseLyrics(raw)
         }
     }
     if (lines.isEmpty()) {

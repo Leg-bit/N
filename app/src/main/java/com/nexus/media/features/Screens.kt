@@ -6,6 +6,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.lazy.grid.*
@@ -53,10 +56,12 @@ fun HomeScreen(vm: LibraryViewModel, nav: NavHostController) {
     val music by vm.music.collectAsState()
     val videos by vm.videos.collectAsState()
     val scanning by c.repository.isScanning.collectAsState()
+    val openDrawer = LocalOpenDrawer.current
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
         item {
             TopBar("NEXUS Media", actions = {
                 IconButton(onClick = { nav.navigate("search") }) { Icon(Icons.Rounded.Search, "Cari") }
+                IconButton(onClick = openDrawer) { Icon(Icons.Rounded.Menu, "Menu") }
             })
         }
         if (scanning) item { LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) }
@@ -261,7 +266,11 @@ fun FoldersScreen(vm: LibraryViewModel, nav: NavHostController) {
     val ctx = LocalContext.current
     val c = LocalContainer.current
     val all by vm.all.collectAsState()
-    val folders = remember(all) { all.groupBy { it.folderPath }.toList().sortedBy { folderName(it.first).lowercase() } }
+    var cat by remember { mutableStateOf("Semua") }
+    val cats = listOf("Semua", "Music", "Movies", "Download", "DCIM", "Recordings", "Kustom")
+    val folders = remember(all, cat) {
+        all.filter { inCategory(it, cat) }.groupBy { it.folderPath }.toList().sortedBy { folderName(it.first).lowercase() }
+    }
     val addFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { u: Uri? ->
         if (u != null) {
             runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -273,6 +282,9 @@ fun FoldersScreen(vm: LibraryViewModel, nav: NavHostController) {
         TopBar("Folder", onBack = { nav.popBackStack() }, actions = {
             IconButton(onClick = { addFolder.launch(null) }) { Icon(Icons.Rounded.Add, "Tambah folder") }
         })
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            cats.forEach { k -> FilterChip(selected = cat == k, onClick = { cat = k }, label = { Text(k) }) }
+        }
         LazyColumn(Modifier.fillMaxSize()) {
             if (folders.isEmpty()) item { EmptyState("Belum ada folder berisi media.") }
             items(folders, key = { it.first }) { (path, list) ->
@@ -404,5 +416,59 @@ fun SettingsScreen(vm: LibraryViewModel) {
             }
         }
         item { Text("NEXUS Media v0.1.0", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+
+private fun inCategory(m: MediaEntity, cat: String): Boolean = when (cat) {
+    "Semua" -> true
+    "Kustom" -> m.id.startsWith("s_")
+    "Recordings" -> listOf("recordings", "recorder", "voice").any { m.folderPath.contains(it, ignoreCase = true) }
+    else -> m.folderPath.split('/').any { it.equals(cat, ignoreCase = true) }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value.ifBlank { "-" })
+    }
+}
+
+/** Halaman Audio Details / Video Details. */
+@Composable
+fun DetailsScreen(nav: NavHostController, id: String) {
+    val ctx = LocalContext.current
+    val c = LocalContainer.current
+    val item by produceState<MediaEntity?>(null, id) { value = c.db.media().getMany(listOf(id)).firstOrNull() }
+    val m = item
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        TopBar(if (m?.mediaType == "video") "Detail video" else "Detail audio", onBack = { nav.popBackStack() })
+        if (m == null) {
+            EmptyState("Memuat…")
+        } else {
+            Thumb(
+                m, Modifier.padding(horizontal = 16.dp).fillMaxWidth().then(
+                    if (m.mediaType == "video") Modifier.aspectRatio(16 / 9f) else Modifier.height(240.dp)
+                ),
+                RoundedCornerShape(20.dp)
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { openMedia(ctx, c, m, listOf(m)) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Putar") }
+            DetailRow("Judul", m.title)
+            if (m.mediaType == "audio") {
+                DetailRow("Artis", m.artist)
+                DetailRow("Album", m.album)
+                DetailRow("Genre", m.genre)
+            } else {
+                DetailRow("Resolusi", if (m.width > 0) "${m.width} x ${m.height}" else "")
+            }
+            DetailRow("Durasi", fmtTime(m.duration))
+            DetailRow("Ukuran", "%.2f MB".format(m.size / 1048576.0))
+            DetailRow("Tipe", m.mimeType)
+            DetailRow("Folder", m.folderPath)
+            DetailRow("Ditambahkan", java.text.SimpleDateFormat("dd MMM yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(m.dateAdded * 1000)))
+            DetailRow("URI", m.uri)
+        }
     }
 }

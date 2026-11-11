@@ -3,15 +3,18 @@ package com.nexus.media.player.service
 import android.content.Intent
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
-import com.nexus.media.NexusApplication
+import com.nexus.media.di.AppContainer
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
+    @Inject lateinit var container: AppContainer
     private var session: MediaSession? = null
 
     override fun onCreate() {
         super.onCreate()
-        val pm = (application as NexusApplication).container.player
-        session = MediaSession.Builder(this, pm.player).build()
+        session = MediaSession.Builder(this, container.player.player).build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session

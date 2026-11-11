@@ -17,9 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.viewmodel.initializer
-import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -32,6 +30,7 @@ import androidx.navigation.navArgument
 import com.nexus.media.core.permissions.MediaPermissions
 import com.nexus.media.di.AppContainer
 import com.nexus.media.features.*
+import kotlinx.coroutines.launch
 
 private data class NavTab(val route: String, val label: String, val icon: ImageVector)
 
@@ -72,44 +71,78 @@ fun NexusApp(c: AppContainer) {
 private fun MainScaffold(c: AppContainer) {
     val nav = rememberNavController()
     var full by remember { mutableStateOf(false) }
-    val vm: LibraryViewModel = viewModel(factory = viewModelFactory { initializer { LibraryViewModel(c) } })
-    CompositionLocalProvider(LocalContainer provides c) {
-        Box(Modifier.fillMaxSize()) {
-            Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
-                bottomBar = {
-                    Column {
-                        MiniPlayer(c) { full = true }
-                        BottomBar(nav)
-                    }
-                }
-            ) { pad ->
-                NavHost(nav, startDestination = "home", modifier = Modifier.padding(pad)) {
-                    composable("home") { HomeScreen(vm, nav) }
-                    composable("video") { VideoScreen(vm, nav) }
-                    composable("music") { MusicScreen(vm, nav) }
-                    composable("library") { LibraryScreen(vm, nav) }
-                    composable("settings") { SettingsScreen(vm) }
-                    composable("search") { SearchScreen(vm, nav) }
-                    composable("folders") { FoldersScreen(vm, nav) }
-                    composable("recent") { RecentScreen(vm, nav) }
-                    composable("duplicates") { DuplicatesScreen(vm, nav) }
-                    composable("playlist/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-                        PlaylistScreen(vm, nav, it.arguments!!.getLong("id"))
-                    }
-                    composable("folder/{path}") { FolderScreen(vm, nav, dec(it.arguments!!.getString("path")!!)) }
-                    composable("group/{kind}/{name}") {
-                        GroupScreen(vm, nav, it.arguments!!.getString("kind")!!, dec(it.arguments!!.getString("name")!!))
+    val vm: LibraryViewModel = hiltViewModel()
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val drawerItems = listOf(
+        NavTab("folders", "Folder", Icons.Rounded.Folder),
+        NavTab("library", "Playlist", Icons.Rounded.PlaylistPlay),
+        NavTab("recent", "Terakhir diputar", Icons.Rounded.History),
+        NavTab("duplicates", "File duplikat", Icons.Rounded.ContentCopy),
+        NavTab("search", "Cari", Icons.Rounded.Search),
+        NavTab("settings", "Pengaturan", Icons.Rounded.Settings)
+    )
+    CompositionLocalProvider(
+        LocalContainer provides c,
+        LocalNav provides nav,
+        LocalOpenDrawer provides { scope.launch { drawer.open() }; Unit }
+    ) {
+        ModalNavigationDrawer(
+            drawerState = drawer,
+            gesturesEnabled = drawer.isOpen,
+            drawerContent = {
+                ModalDrawerSheet {
+                    Text("NEXUS Media", Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge)
+                    drawerItems.forEach { t ->
+                        NavigationDrawerItem(
+                            label = { Text(t.label) },
+                            icon = { Icon(t.icon, null) },
+                            selected = false,
+                            onClick = { scope.launch { drawer.close() }; nav.navigate(t.route) },
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
                     }
                 }
             }
-            AnimatedVisibility(
-                visible = full,
-                enter = slideInVertically { it },
-                exit = slideOutVertically { it }
-            ) {
-                BackHandler { full = false }
-                FullPlayer(c) { full = false }
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    bottomBar = {
+                        Column {
+                            MiniPlayer(c) { full = true }
+                            BottomBar(nav)
+                        }
+                    }
+                ) { pad ->
+                    NavHost(nav, startDestination = "home", modifier = Modifier.padding(pad)) {
+                        composable("home") { HomeScreen(vm, nav) }
+                        composable("video") { VideoScreen(vm, nav) }
+                        composable("music") { MusicScreen(vm, nav) }
+                        composable("library") { LibraryScreen(vm, nav) }
+                        composable("settings") { SettingsScreen(vm) }
+                        composable("search") { SearchScreen(vm, nav) }
+                        composable("folders") { FoldersScreen(vm, nav) }
+                        composable("recent") { RecentScreen(vm, nav) }
+                        composable("duplicates") { DuplicatesScreen(vm, nav) }
+                        composable("details/{id}") { DetailsScreen(nav, it.arguments!!.getString("id")!!) }
+                        composable("playlist/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
+                            PlaylistScreen(vm, nav, it.arguments!!.getLong("id"))
+                        }
+                        composable("folder/{path}") { FolderScreen(vm, nav, dec(it.arguments!!.getString("path")!!)) }
+                        composable("group/{kind}/{name}") {
+                            GroupScreen(vm, nav, it.arguments!!.getString("kind")!!, dec(it.arguments!!.getString("name")!!))
+                        }
+                    }
+                }
+                AnimatedVisibility(
+                    visible = full,
+                    enter = slideInVertically { it },
+                    exit = slideOutVertically { it }
+                ) {
+                    BackHandler { full = false }
+                    FullPlayer(c) { full = false }
+                }
             }
         }
     }
